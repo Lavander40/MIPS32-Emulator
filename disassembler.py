@@ -1,6 +1,5 @@
 import re
 
-
 class DisassemblerMIPS:
     def __init__(self):
         self.opcode_map = {
@@ -33,23 +32,42 @@ class DisassemblerMIPS:
             'XOR': 0x26,
             'NOR': 0x27,
         }
+        self.labels = {}  # Таблица меток
 
-    # Чтение из файла
     def disassemble(self, asm_code):
         program = []
         lines = asm_code.splitlines()  # Разбиваем текст на строки
+
+        # Проход 1: Собираем метки
+        pc = 0  # Программный счетчик
         for line in lines:
-            line = line.strip()  # Убираем лишние пробелы
-            if line:  # Если строка не пустая
-                try:
-                    machine_code = self.assemble_instruction(line)  # Преобразуем строку в машинный код
-                    program.append(machine_code)  # Добавляем машинный код в программу
-                except ValueError as e:
-                    print(f"Ошибка обработки строки '{line}': {e}")
+            line = line.strip()
+            if line.endswith(':'):  # Если строка заканчивается на двоеточие — это метка
+                label = line[:-1]
+                self.labels[label] = pc  # Запоминаем адрес метки
+            else:
+                pc += 1  # Увеличиваем программный счётчик для каждой инструкции
+
+        # Проход 2: Преобразуем команды в машинный код
+        pc = 0
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if line.endswith(':'):
+                program.append(0)
+                pc += 1
+                continue
+            try:
+                machine_code = self.assemble_instruction(line, pc)  # Преобразуем строку в машинный код
+                program.append(machine_code)
+                pc += 1
+            except ValueError as e:
+                print(f"Ошибка обработки строки '{line}': {e}")
+        program.append(4294967295)
         return program
 
-    # Команда в машинный код
-    def assemble_instruction(self, line):
+    def assemble_instruction(self, line, pc):
         parts = line.split()
         instr = parts[0]
 
@@ -74,7 +92,13 @@ class DisassemblerMIPS:
             else:  # I-формат
                 rt = self.parse_register(parts[1].strip(','))
                 rs = self.parse_register(parts[2].strip(','))
-                imm = int(parts[3])  # Непосредственное значение
+
+                # Поддержка меток для команд с переходами
+                if instr in ['BEQ', 'BNE']:
+                    imm = self.resolve_label(parts[3], pc)
+                else:
+                    imm = int(parts[3])
+
                 imm = self.check_immediate(imm, bits=16)  # Проверка размера значения
                 opcode = self.opcode_map[instr] << 26
                 machine_code = (opcode | (rs << 21) | (rt << 16) | (imm & 0xFFFF))
@@ -82,7 +106,15 @@ class DisassemblerMIPS:
         else:
             raise ValueError(f"Неизвестная инструкция: {instr}")
 
-    # Преобразует регистр в число
+    # Метод для преобразования метки в адрес
+    def resolve_label(self, label, pc):
+        if label in self.labels:
+            target_pc = self.labels[label]
+            offset = target_pc - pc + 1
+            return offset
+        else:
+            raise ValueError(f"Метка '{label}' не найдена")
+
     def parse_register(self, reg_str):
         if reg_str[0] != 'R' or not reg_str[1:].isdigit():
             raise ValueError(f"Некорректный регистр: {reg_str}")
@@ -91,9 +123,7 @@ class DisassemblerMIPS:
             raise ValueError(f"Регистр {reg_str} не существует. Допустимые регистры: R0-R31")
         return reg_num
 
-    # Получает адресс из регистра
     def parse_memory_address(self, address_str):
-        # Используем регулярное выражение для выделения смещения и регистра
         match = re.match(r'(-?\d+)\((R\d+)\)', address_str)
         if match:
             offset = int(match.group(1))
@@ -102,7 +132,6 @@ class DisassemblerMIPS:
         else:
             raise ValueError(f"Некорректная адресация: {address_str}")
 
-    # Проверка размера числа
     def check_immediate(self, imm, bits=16):
         min_val = -(1 << (bits - 1))  # Минимальное значение для знакового числа
         max_val = (1 << (bits - 1)) - 1  # Максимальное значение для знакового числа

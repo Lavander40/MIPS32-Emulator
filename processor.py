@@ -18,11 +18,11 @@ class EmulatorMIPS:
         instruction = self.fetch()
         if instruction == 0xFFFFFFFF:  # Команда остановки
             print("\nProgram finished (STOP command encountered)")
-            return
+            raise EmptyException
             # break
         if instruction is None or instruction == 0x0:
             print("\nEmpty command encountered stopping the process")
-            raise EmptyException
+            return
             # break
         print(hex(instruction))
         opcode, rs, rt, rd, imm = self.decode(instruction)
